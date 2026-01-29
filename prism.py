@@ -1,7 +1,7 @@
 # written by Alper Baspinar
 
 from run_files.pdbDownload import PDBdownloader # pdbdownloader
-from run_files.templateGenerator import TemplateGenerator # templateGenerator
+from run_files.templateGenerator import template_generator # templateGenerator
 from run_files.preProcessor import preprocess_input_proteins # preProcessor
 from run_files.surfaceExtractor import SurfaceExtractor # surfaceExtractor
 from run_files.structuralAlignmentTM import StructuralAligner # structuralAligner
@@ -15,7 +15,7 @@ print("PDB download stage finished...")
 
 #checks template
 print("Template generation stage started...")
-templates = TemplateGenerator().generator()
+templates = template_generator()
 print("Template generation stage finished...")
 
 print("PreProcess stage started...")

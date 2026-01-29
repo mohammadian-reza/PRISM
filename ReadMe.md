@@ -1,3 +1,8 @@
+# STEPS to develpe
+1. Read paper to see how template generator works?
+2. What is difference between contact and hotspot and interfaces?
+3. update templates and pdb
+
 # paper link
 https://pmc.ncbi.nlm.nih.gov/articles/PMC7384353/pdf/nihms-1607029.pdf
 

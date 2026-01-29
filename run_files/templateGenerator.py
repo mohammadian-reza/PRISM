@@ -2,56 +2,252 @@
 # this class gets the interface list from user then checks if it exists or not. If it doesn't exist, it creates interface pdb and hotspot_data for interfaces.
 
 import os
-import configparser
+
+def template_generator():
+    calculated_templates = []
+    for template in [line.strip()[:6] for line in open("templates.txt", "r").readlines()]:
+        try:
+            print(f"Interface Generation for {template} started!!")
+            chainDict1, chainDict2 = prepareInterfaceDictVDW(template[:4].lower(),template[4],template[5])
+            interfaceWriterVDW(template, chainDict1, chainDict2)
+            print(f"Interface Generation for {template} Finished!!")
+            print(f"HotSpot Generation for {template} Started!!")
+            hotspot_creator(template)
+            print(f"HotSpot Generation for {template} Finished!!")
+            print(f"Contact Generation for {template} Started!!")
+            contact_writer(template)
+            print(f"Contact Generation for {template} Finished!!")
+            calculated_templates.append(template)
+        except Exception as e:
+            print(f"Error in template generation for {template}: {e}")
+            continue
+    return calculated_templates
+
+def prepare_interface_dict_vdw(protein, chain_id1, chain_id2):
+    pdb_path = f"pdb/{protein}.pdb"
+    left = set()
+    right = set()
+    chain_list1 = []
+    chain_list2 = []
+    chain_interact1_res = {}
+    chain_interact2_res = {}
+    chain_ca1 = {}
+    chain_ca2 = {}
+    pdb_hnd = open(pdb_path, "r")
+    line_list = []
+    alternate_location_dict = {}
+    icode_dict = {}
+    for line in pdb_hnd.readlines():
+        if line[:3] == "END":
+            break
+        if line[0:4] == "ATOM":
+            chain = line[21]
+            atomName = line[12:16]
+            resName = line[17:20]
+            residueSeq = line[22:26]
+            altLoc = line[16] #icode and alternate location handled
+            icode = line[26]
+            key = chain+residueSeq
+            key2 = key+atomName
+            check1 = alternate_location_dict.has_key(key2)
+            check2 = icode_dict.has_key(key)
+            #these lines are needed to detect alternateLocation or icode differences, the first one is taken...
+            if check1 == False and check2 == False:
+                alternateLocationDic[key2] = altLoc
+                icodeDic[key] = icode
+                try:
+                    d1 = self.dictionaryVDWRadiiExtended(resName)    
+                    lineList.append(line)
+                except:
+                    continue
+            elif check1 == False and check2 == True:
+                alternateLocationDic[key2] = altLoc
+                if icodeDic[key] == icode:
+                    try:
+                        d1 = self.dictionaryVDWRadiiExtended(resName)
+                        lineList.append(line)
+                    except:
+                        continue
+    pdbhnd.close()    
+    #######this part creates monomer1 monomer2 and interface pops or naccess files###################3
+    interfaceName = protein+chainId1+chainId2
+    monomer12Path = "%s.pdb" % (interfaceName)
+    monomer12 = open(monomer12Path,"w")
+    chain2List = []
+    for line in lineList:
+        chain = line[21]
+        if chain == chainId1:
+            monomer12.write(line)
+        elif chain == chainId2:
+            chain2List.append(line)
+    for line in chain2List:
+        monomer12.write(line)
+    monomer12.close()
+    ##create rsa files
+    if self.external_tool_choice == 0:
+        popsOutputFile = interfaceName + ".rsa" #protein result path
+        errorFile = "error"
+        if os.path.exists(monomer12Path):
+            os.system("%s --pdb %s --residueOut --popsOut %s > %s" % (self.external_tool,monomer12Path, popsOutputFile, errorFile))
+        else:
+            print("interface does not exist")
+            return (chainInteract1Res,chainInteract2Res)
+    else:
+        naccessOut = "naccessOut"
+        naccessError = "naccessError"
+        if os.path.exists(monomer12Path):
+            os.system("%s %s > %s 2>%s" % (self.external_tool,monomer12Path,naccessOut,naccessError))
+        else:
+            print("interface does not exist")
+            return (chainInteract1Res,chainInteract2Res)
+    ######################################################################
+    for line in lineList:
+        if line[:3] == "END":
+            break
+        elif line[:4] == "ATOM":
+            atomName = line[12:16].strip()
+            resName = line[17:20]
+            chainId = line[21]
+            resSeq = int(line[22:26].strip())
+            coordinates = [float(line[30:38]), float(line[38:46]), float(line[46:54])]
+            if chainId == chainId1:
+                d1 = self.dictionaryVDWRadiiExtended(resName)
+                try:
+                    d1 = d1[atomName]
+                except:
+                    d1 = 0
+                check1 = self.three2One(resName)
+                check2 = atomName[0]
+                leftValue = self.three2One(resName)+str(resSeq)+chainId1
+                leftContact = chainId1+"."+self.three2One(resName)+"."+str(resSeq)+"\t"
+                chainList1.append([line, resSeq, coordinates, d1,check1, check2, leftValue,leftContact])
+                if atomName == 'CA':
+                    chainCa1[resSeq] = [line,coordinates]
+            elif chainId == chainId2:
+                d1 = self.dictionaryVDWRadiiExtended(resName)
+                try:
+                    d1 = d1[atomName]
+                except:
+                    d1 = 0
+                check1 = self.three2One(resName)
+                check2 = atomName[0]
+                rightValue = self.three2One(resName)+str(resSeq)+chainId2
+                rightContact = chainId2+"."+self.three2One(resName)+"."+str(resSeq)
+                chainList2.append([line, resSeq, coordinates, d1, check1, check2, rightValue,rightContact])
+                if atomName == 'CA':
+                    chainCa2[resSeq] = [line,coordinates]
+
+    for atom1 in chainList1:
+        for atom2 in chainList2:
+            if atom1[4] != 'X' and atom1[5] != 'H' and atom2[4] != 'X' and atom2[5] != 'H':
+                cutoff = atom1[3] + atom2[3] + 0.5
+                distance = self.distanceCalculator(atom1[2],atom2[2])
+                if distance <= cutoff:
+                    self.left.add(atom1[6])
+                    self.right.add(atom2[6])
+                    key = str(atom1[1])+str(atom2[1])
+                    if self.contact.has_key(key) == False:
+                        self.contact[key] = atom1[7]+atom2[7]
+                    try:
+                        chainInteract1Res[atom1[1]] = chainCa1[atom1[1]]
+                    except KeyError:
+                        continue
+                    try:
+                        chainInteract2Res[atom2[1]] = chainCa2[atom2[1]]
+                    except KeyError:
+                        continue
+    self.left = list(self.left)
+    self.left.sort()
+    self.right = list(self.right)
+    self.right.sort()
+    #adding nearby residues
+    #first chain
+    atom1Iterable = chainCa1.keys()
+    atom2Iterable = chainInteract1Res.keys()
+    for key1 in atom1Iterable:
+        if key1 not in atom2Iterable:
+                for key2 in atom2Iterable:
+                    distance = self.distanceCalculator(chainCa1[key1][1],chainInteract1Res[key2][1])
+                    if distance <= self.cutOff:
+                        try:
+                            chainInteract1Res[key1] = chainCa1[key1]
+                        except KeyError:
+                            continue
+
+    #second chain
+    atom1Iterable = chainCa2.keys()
+    atom2Iterable = chainInteract2Res.keys()
+    for key1 in atom1Iterable:
+        if key1 not in atom2Iterable:
+                for key2 in atom2Iterable:
+                    distance = self.distanceCalculator(chainCa2[key1][1],chainInteract2Res[key2][1])
+                    if distance <= self.cutOff:
+                        try:
+                            chainInteract2Res[key1] = chainCa2[key1]
+                        except KeyError:
+                            continue
+
+    return (chainInteract1Res,chainInteract2Res)
+
+def interfaceWriterVDW(self, interface, chainDict1, chainDict2):
+    if len(chainDict1) == 0 or len(chainDict2) == 0:
+        print("Interface "+interface+" does not exist!!")
+        return 0
+    interfaceWriterLeft = open(self.interfacePath+"/%s_%s.int" % (interface,interface[4]),"w")
+    interfaceWriterRight = open(self.interfacePath+"/%s_%s.int" % (interface,interface[5]),"w")
+    for key in sorted(chainDict1.iterkeys()):
+        interfaceWriterLeft.writelines(chainDict1[key][0])
+    for key in sorted(chainDict2.iterkeys()):
+        interfaceWriterRight.writelines(chainDict2[key][0])
+
+    interfaceWriterLeft.close()
+    interfaceWriterRight.close()
+    return 1
+
+
+
+
+
 
 class TemplateGenerator:
     def __init__(self):
-        config = configparser.ConfigParser()
-        config.read('prism.ini') #use configParser to get configuration info. from 'prism.ini'
-        self.pdbPath = config.get('Pdb_Folder','pdb_path') #defines where to download pdbs wrt workpath and changes into abs
-        self.interfacePath = config.get('Structural_Alignment','interface_path')
-        self.hotSpotPath = config.get('Transformation_Filtering','hotspotdatapath')
-        self.contactPath = config.get('Transformation_Filtering','contactpath')
-        self.cutOff = 6
-        self.external_tool = config.get('External_Tools','naccess') #where executable located.
-        self.left = set()
-        self.right = set()
+        self.pdb_path = "pdb"
+        self.interface_path = "template/interfaces"
+        self.hotspot_path = "template/hotspot"
+        self.contact_path = "template/contact"
+        self.cut_off = 6
+        self.external_tool = "external_tools/naccess/naccess" # where the naccess executable is located.
         self.contact = {}
     
-    def generator(self):
-        calculated_templates = []
-        templates = [line.strip()[:6] for line in open("templates.txt", "r").readlines()]
-        for interface in templates:
-            try:
-                print("Interface Generation for %s started!!" % interface)
-                if self.interfaceCreator(interface) == 1:
-                    calculated_templates.append(interface)
-                    print("Interface Generation for %s Finished!!" % interface)
-                    print("HotSpot Generation for %s Started!!" % interface)
-                    self.hotSpotCreator(interface)
-                    print("HotSpot Generation for %s Finished!!" % interface)
-                    print("Contact Generation for %s Started!!" % interface)
-                    self.contactWriter(interface)
-                    print("Contact Generation for %s Finished!!" % interface)
-            except KeyError:
-                print("Interface Error for %s" % interface)
-                continue
-        return calculated_templates
-    
-    def three2One(self, resName):
-        RESIDUE_LIST = {'ALA':'A', 'CYS':'C', 'ASP':'D', 'GLU':'E', 'PHE':'F', 'GLY':'G', 'HIS':'H', 'ILE':'I', 'LYS':'K', 'LEU':'L', 'MET':'M', 'ASN':'N', 'PRO':'P', 'GLN':'Q',\
-                        'ARG':'R', 'SER':'S', 'THR':'T', 'VAL':'V', 'TRP':'W', 'TYR':'Y'}
-        if RESIDUE_LIST.has_key(resName):
-            return RESIDUE_LIST[resName]
-        else:
-            return 'X'
+    def three2One(self, res_name):
+        return {
+            'ALA':'A',
+            'CYS':'C',
+            'ASP':'D',
+            'GLU':'E',
+            'PHE':'F',
+            'GLY':'G',
+            'HIS':'H',
+            'ILE':'I',
+            'LYS':'K',
+            'LEU':'L',
+            'MET':'M',
+            'ASN':'N',
+            'PRO':'P',
+            'GLN':'Q',
+            'ARG':'R',
+            'SER':'S',
+            'THR':'T',
+            'VAL':'V',
+            'TRP':'W',
+            'TYR':'Y'
+        }.get(res_name, 'X')
 
-    def dictionaryVDWRadii(self):
-        VDW_RADII = { 'C':1.76, 'N':1.65, 'O':1.40, 'CA':1.87, 'H':1.20, 'S':1.85, 'CB':1.87, 'CZ':1.76, 'NZ':1.50, 'CD':1.81, 'CE':1.81, 'CG':1.81, 'C1':1.80, 'P':1.90 }
-        return VDW_RADII
+    def dictionary_vdw_radii(self):
+        return { 'C':1.76, 'N':1.65, 'O':1.40, 'CA':1.87, 'H':1.20, 'S':1.85, 'CB':1.87, 'CZ':1.76, 'NZ':1.50, 'CD':1.81, 'CE':1.81, 'CG':1.81, 'C1':1.80, 'P':1.90 }
 
-    def dictionaryVDWRadiiExtended(self, resName):
-        VDW_RADII_EXTENDED = {  'ALA': { 'N': 1.65, 'CA': 1.87, 'C': 1.76, 'O': 1.40, 'CB': 1.87, 'OXT': 1.40  },\
+    def dictionary_vdw_radii_extended(self, resName):
+        return {  'ALA': { 'N': 1.65, 'CA': 1.87, 'C': 1.76, 'O': 1.40, 'CB': 1.87, 'OXT': 1.40  },\
                                 'ARG': { 'N': 1.65, 'CA': 1.87, 'C': 1.76, 'O': 1.40, 'CB': 1.87, 'CG': 1.87, 'CD': 1.87, 'NE': 1.65, 'CZ': 1.76, 'NH1': 1.65, 'NH2': 1.65, 'OXT': 1.40 },\
                                 'ASP': { 'N': 1.65, 'CA': 1.87, 'C': 1.76, 'O': 1.40, 'CB': 1.87, 'CG': 1.76, 'OD1': 1.40, 'OD2': 1.40, 'OXT': 1.40  },\
                                    'ASN': { 'N': 1.65, 'CA': 1.87, 'C': 1.76, 'O': 1.40, 'CB': 1.87, 'CG': 1.76, 'OD1': 1.40, 'ND2': 1.65, 'OXT': 1.40 },\
@@ -74,189 +270,6 @@ class TemplateGenerator:
                                    'ACE': { 'C': 1.76, 'O': 1.40, 'CA': 1.87 }, 'PCA':self.dictionaryVDWRadii(), 'UNK':self.dictionaryVDWRadii() }
 
         return VDW_RADII_EXTENDED[resName]
-
-    def prepareInterfaceDictVDW(self, protein, chainId1, chainId2):
-        pdbPath = self.pdbPath+"/%s.pdb" % protein
-        self.left = set()
-        self.right = set()
-        chainList1 = []
-        chainList2 = []
-        chainInteract1Res = {}
-        chainInteract2Res = {}
-        chainCa1 = {}
-        chainCa2 = {}
-        pdbhnd = open(pdbPath,"r")
-    
-        ######this part to correct some problematic part of the pdb#######################33
-        lineList = []
-        alternateLocationDic = {}
-        icodeDic = {}
-        for line in pdbhnd.readlines():
-            if line[:3] == "END":
-                break
-            if line[0:4] == "ATOM":
-                chain = line[21]
-                atomName = line[12:16]
-                resName = line[17:20]
-                residueSeq = line[22:26]
-                altLoc = line[16] #icode and alternate location handled
-                icode = line[26]
-                key = chain+residueSeq
-                key2 = key+atomName
-                check1 = alternateLocationDic.has_key(key2)
-                check2 = icodeDic.has_key(key)
-                #these lines are needed to detect alternateLocation or icode differences, the first one is taken...
-                if check1 == False and check2 == False:
-                    alternateLocationDic[key2] = altLoc
-                    icodeDic[key] = icode
-                    try:
-                        d1 = self.dictionaryVDWRadiiExtended(resName)    
-                        lineList.append(line)
-                    except:
-                        continue
-                elif check1 == False and check2 == True:
-                    alternateLocationDic[key2] = altLoc
-                    if icodeDic[key] == icode:
-                        try:
-                            d1 = self.dictionaryVDWRadiiExtended(resName)
-                            lineList.append(line)
-                        except:
-                            continue
-        pdbhnd.close()    
-        #######this part creates monomer1 monomer2 and interface pops or naccess files###################3
-        interfaceName = protein+chainId1+chainId2
-        monomer12Path = "%s.pdb" % (interfaceName)
-        monomer12 = open(monomer12Path,"w")
-        chain2List = []
-        for line in lineList:
-            chain = line[21]
-            if chain == chainId1:
-                monomer12.write(line)
-            elif chain == chainId2:
-                chain2List.append(line)
-        for line in chain2List:
-            monomer12.write(line)
-        monomer12.close()
-        ##create rsa files
-        if self.external_tool_choice == 0:
-            popsOutputFile = interfaceName + ".rsa" #protein result path
-            errorFile = "error"
-            if os.path.exists(monomer12Path):
-                os.system("%s --pdb %s --residueOut --popsOut %s > %s" % (self.external_tool,monomer12Path, popsOutputFile, errorFile))
-            else:
-                print("interface does not exist")
-                return (chainInteract1Res,chainInteract2Res)
-        else:
-            naccessOut = "naccessOut"
-            naccessError = "naccessError"
-            if os.path.exists(monomer12Path):
-                os.system("%s %s > %s 2>%s" % (self.external_tool,monomer12Path,naccessOut,naccessError))
-            else:
-                print("interface does not exist")
-                return (chainInteract1Res,chainInteract2Res)
-        ######################################################################
-        for line in lineList:
-            if line[:3] == "END":
-                break
-            elif line[:4] == "ATOM":
-                atomName = line[12:16].strip()
-                resName = line[17:20]
-                chainId = line[21]
-                resSeq = int(line[22:26].strip())
-                coordinates = [float(line[30:38]), float(line[38:46]), float(line[46:54])]
-                if chainId == chainId1:
-                    d1 = self.dictionaryVDWRadiiExtended(resName)
-                    try:
-                        d1 = d1[atomName]
-                    except:
-                        d1 = 0
-                    check1 = self.three2One(resName)
-                    check2 = atomName[0]
-                    leftValue = self.three2One(resName)+str(resSeq)+chainId1
-                    leftContact = chainId1+"."+self.three2One(resName)+"."+str(resSeq)+"\t"
-                    chainList1.append([line, resSeq, coordinates, d1,check1, check2, leftValue,leftContact])
-                    if atomName == 'CA':
-                        chainCa1[resSeq] = [line,coordinates]
-                elif chainId == chainId2:
-                    d1 = self.dictionaryVDWRadiiExtended(resName)
-                    try:
-                        d1 = d1[atomName]
-                    except:
-                        d1 = 0
-                    check1 = self.three2One(resName)
-                    check2 = atomName[0]
-                    rightValue = self.three2One(resName)+str(resSeq)+chainId2
-                    rightContact = chainId2+"."+self.three2One(resName)+"."+str(resSeq)
-                    chainList2.append([line, resSeq, coordinates, d1, check1, check2, rightValue,rightContact])
-                    if atomName == 'CA':
-                        chainCa2[resSeq] = [line,coordinates]
-
-        for atom1 in chainList1:
-            for atom2 in chainList2:
-                if atom1[4] != 'X' and atom1[5] != 'H' and atom2[4] != 'X' and atom2[5] != 'H':
-                    cutoff = atom1[3] + atom2[3] + 0.5
-                    distance = self.distanceCalculator(atom1[2],atom2[2])
-                    if distance <= cutoff:
-                        self.left.add(atom1[6])
-                        self.right.add(atom2[6])
-                        key = str(atom1[1])+str(atom2[1])
-                        if self.contact.has_key(key) == False:
-                            self.contact[key] = atom1[7]+atom2[7]
-                        try:
-                            chainInteract1Res[atom1[1]] = chainCa1[atom1[1]]
-                        except KeyError:
-                            continue
-                        try:
-                            chainInteract2Res[atom2[1]] = chainCa2[atom2[1]]
-                        except KeyError:
-                            continue
-        self.left = list(self.left)
-        self.left.sort()
-        self.right = list(self.right)
-        self.right.sort()
-        #adding nearby residues
-        #first chain
-        atom1Iterable = chainCa1.keys()
-        atom2Iterable = chainInteract1Res.keys()
-        for key1 in atom1Iterable:
-            if key1 not in atom2Iterable:
-                    for key2 in atom2Iterable:
-                        distance = self.distanceCalculator(chainCa1[key1][1],chainInteract1Res[key2][1])
-                        if distance <= self.cutOff:
-                            try:
-                                chainInteract1Res[key1] = chainCa1[key1]
-                            except KeyError:
-                                continue
-
-        #second chain
-        atom1Iterable = chainCa2.keys()
-        atom2Iterable = chainInteract2Res.keys()
-        for key1 in atom1Iterable:
-            if key1 not in atom2Iterable:
-                    for key2 in atom2Iterable:
-                        distance = self.distanceCalculator(chainCa2[key1][1],chainInteract2Res[key2][1])
-                        if distance <= self.cutOff:
-                            try:
-                                chainInteract2Res[key1] = chainCa2[key1]
-                            except KeyError:
-                                continue
-
-        return (chainInteract1Res,chainInteract2Res)
-
-    def interfaceWriterVDW(self, interface, chainDict1, chainDict2):
-        if len(chainDict1) == 0 or len(chainDict2) == 0:
-            print("Interface "+interface+" does not exist!!")
-            return 0
-        interfaceWriterLeft = open(self.interfacePath+"/%s_%s.int" % (interface,interface[4]),"w")
-        interfaceWriterRight = open(self.interfacePath+"/%s_%s.int" % (interface,interface[5]),"w")
-        for key in sorted(chainDict1.iterkeys()):
-            interfaceWriterLeft.writelines(chainDict1[key][0])
-        for key in sorted(chainDict2.iterkeys()):
-            interfaceWriterRight.writelines(chainDict2[key][0])
-
-        interfaceWriterLeft.close()
-        interfaceWriterRight.close()
-        return 1
 
     def contactWriter(self, interface):
         contactWrite = open(self.contactPath+"/%s.txt" % interface,"w")
