@@ -1,6 +1,6 @@
 from run_files.pdb_download import pdb_downloader
 from run_files.template_generate import template_generator
-from run_files.surfaceExtractor import SurfaceExtractor
+from run_files.surface_extract import extract_surface
 from run_files.structuralAlignmentTM import StructuralAligner
 from run_files.transformationFiltering import TransformFilter
 from run_files.flexibleRefinementRosetta import FlexibleRefinement
@@ -16,7 +16,7 @@ templates = template_generator()
 print("Template generation stage finished...")
 
 print("SurfaceExtraction stage started...")
-SurfaceExtractor(targets).surfaceExtractor()
+extract_surface(targets)
 print("SurfaceExtraction stage finished...")
 
 print("Structural Alignment stage started...")

@@ -9,7 +9,11 @@ def extract_surface(queries):
     for protein in queries:
         if run_naccess(protein) == 1:
             asaDict = extract_surface(protein)
-            output_asa_file(protein, asaDict)
+            if len(asaDict) != 0:
+                with open(f"surface_extraction/{protein}.asa.pdb", "w") as asahnd:
+                    for key in sorted(asaDict.keys()):
+                        asahnd.writelines(asaDict[key])
+                    asahnd.writelines("END")
 
 def run_naccess(protein):
     protein_path = f"pdb/{protein}.pdb"
@@ -69,11 +73,7 @@ def extract_surface(protein):
                     if atom == "CA" and resNo == resseq and chain == reschn:
                         asaDict[serialNumber] = asaline
 
-    return find_scaffold(asaDict, proteinPath)
-
-def find_scaffold(asaDict, proteinPath):
-    with open(proteinPath, "r") as pdbhnd:
-        for line in pdbhnd.readlines():
+        for line in asahandler.readlines():
             if line[:3] == "END":
                 break
             serialNumber = line[6:11]
@@ -89,7 +89,6 @@ def find_scaffold(asaDict, proteinPath):
                     if dist <= SCFFTHRESHOLD:
                         if serialNumber not in asaDict:
                             asaDict[serialNumber] = line
-
     return asaDict
 
 def standard_data(resname):
@@ -115,12 +114,3 @@ def standard_data(resname):
         'TRP':249.36,
         'TYR':212.76,
     }.get(resname, -1)
-
-def output_asa_file(protein, asaDict):
-    if len(asaDict) != 0:
-        with open(f"surface_extraction/{protein}.asa.pdb", "w") as asahnd:
-            for key in sorted(asaDict.keys()):
-                asahnd.writelines(asaDict[key])
-            asahnd.writelines("END")
-            asahnd.close()
-
