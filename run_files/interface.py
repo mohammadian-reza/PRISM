@@ -1,0 +1,204 @@
+import os
+from Bio.PDB import PDBParser
+import shutil
+
+# Nearby residue cutoff: Cα of non-interacting residue within this distance of an interacting residue (same chain)
+NEARBY_CA_CUTOFF = 6.0  # Å
+
+# Default vdW radius for atoms not in residue-specific dict (Å)
+DEFAULT_VDW = 1.80
+
+def _distance(coords1, coords2):
+    return (
+        (coords1[0] - coords2[0]) ** 2
+        + (coords1[1] - coords2[1]) ** 2
+        + (coords1[2] - coords2[2]) ** 2
+    ) ** 0.5
+
+def _vdw_radii_extended(res_name):
+    """Per-residue, per-atom van der Waals radii (Å)."""
+    d = {
+        "ALA": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "OXT": 1.40},
+        "ARG": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "CG": 1.87, "CD": 1.87, "NE": 1.65, "CZ": 1.76, "NH1": 1.65, "NH2": 1.65, "OXT": 1.40},
+        "ASP": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "CG": 1.76, "OD1": 1.40, "OD2": 1.40, "OXT": 1.40},
+        "ASN": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "CG": 1.76, "OD1": 1.40, "ND2": 1.65, "OXT": 1.40},
+        "CYS": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "SG": 1.85, "OXT": 1.40},
+        "GLU": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "CG": 1.87, "CD": 1.76, "OE1": 1.40, "OE2": 1.40, "OXT": 1.40},
+        "GLN": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "CG": 1.87, "CD": 1.76, "OE1": 1.40, "NE2": 1.65, "OXT": 1.40},
+        "GLY": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "OXT": 1.40},
+        "HIS": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "CG": 1.76, "ND1": 1.65, "CD2": 1.76, "CE1": 1.76, "NE2": 1.65, "OXT": 1.40},
+        "ILE": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "CG1": 1.87, "CG2": 1.87, "CD1": 1.87, "OXT": 1.40},
+        "LEU": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "CG": 1.87, "CD1": 1.87, "CD2": 1.87, "OXT": 1.40},
+        "LYS": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "CG": 1.87, "CD": 1.87, "CE": 1.87, "NZ": 1.50, "OXT": 1.40},
+        "MET": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "CG": 1.87, "SD": 1.85, "CE": 1.87, "OXT": 1.40},
+        "PHE": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "CG": 1.76, "CD1": 1.76, "CD2": 1.76, "CE1": 1.76, "CE2": 1.76, "CZ": 1.76, "OXT": 1.40},
+        "PRO": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "CG": 1.87, "CD": 1.87, "OXT": 1.40},
+        "SER": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "OG": 1.40, "OXT": 1.40},
+        "THR": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "OG1": 1.40, "CG2": 1.87, "OXT": 1.40},
+        "TRP": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "CG": 1.76, "CD1": 1.76, "CD2": 1.76, "NE1": 1.65, "CE2": 1.76, "CE3": 1.76, "CZ2": 1.76, "CZ3": 1.76, "CH2": 1.76, "OXT": 1.40},
+        "TYR": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "CG": 1.76, "CD1": 1.76, "CD2": 1.76, "CE1": 1.76, "CE2": 1.76, "CZ": 1.76, "OH": 1.40, "OXT": 1.40},
+        "VAL": {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40, "CB": 1.87, "CG1": 1.87, "CG2": 1.87, "OXT": 1.40},
+    }
+    return d.get(res_name, {"N": 1.65, "CA": 1.87, "C": 1.76, "O": 1.40})
+
+def _format_pdb_line(atom_serial, atom_name, res_name, chain_id, res_seq, x, y, z, occupancy=1.00, bfactor=0.00, element="C"):
+    """Format a single ATOM line. atom_name should be 4 chars (e.g. ' CA ')."""
+    return (
+        f"ATOM  {atom_serial:5d} {atom_name:4s}{res_name:3s} {chain_id}{res_seq:4d}    "
+        f"{x:8.3f}{y:8.3f}{z:8.3f}{occupancy:6.2f}{bfactor:6.2f}           {element:2s}  \n"
+    )
+
+def generate_interface(protein, chain1, chain2, pdb_dir="pdb", output_dir="interface"):
+    # Also copy the original pdb file to the output_dir
+    protein_lower = protein.lower().strip()
+    pdb_path = os.path.join(pdb_dir, f"{protein_lower}.pdb")
+    output_pdb_path = os.path.join(output_dir, f"{protein_lower}.pdb")
+    shutil.copy2(pdb_path, output_pdb_path)
+    
+    protein_lower = protein.lower().strip()
+    pdb_path = os.path.join(pdb_dir, f"{protein_lower}.pdb")
+    if not os.path.isfile(pdb_path):
+        raise FileNotFoundError(f"PDB file not found: {pdb_path}")
+
+    os.makedirs(output_dir, exist_ok=True)
+    label = f"{protein_lower}{chain1}{chain2}"
+    parser = PDBParser(QUIET=True)
+    structure = parser.get_structure(protein_lower, pdb_path)
+
+    # Collect all atoms (and Cα) for the two chains
+    # chain_data[c][res_seq] = list of (atom_name, coords, vdw)
+    # chain_ca[c][res_seq] = (res_name, coords) for Cα
+    chain_data = {chain1: {}, chain2: {}}
+    chain_ca = {chain1: {}, chain2: {}}
+
+    for model in structure:
+        for chain in model:
+            if chain.id not in (chain1, chain2):
+                continue
+            for residue in chain:
+                if not hasattr(residue, "id"):
+                    continue
+                hetflag, res_seq, icode = residue.id
+                if hetflag != " ":
+                    continue
+                res_name = residue.get_resname()
+                vdw_map = _vdw_radii_extended(res_name)
+                atoms = []
+                ca_coords = None
+                for atom in residue:
+                    name = atom.get_name()
+                    coords = list(atom.get_coord())
+                    vdw = vdw_map.get(name, DEFAULT_VDW)
+                    atoms.append((name, coords, vdw))
+                    if name == "CA":
+                        ca_coords = coords
+                if atoms and ca_coords is not None:
+                    chain_data[chain.id][res_seq] = (res_name, atoms)
+                    chain_ca[chain.id][res_seq] = (res_name, ca_coords)
+
+    # Find interacting residues: any atom from chain1 vs any atom from chain2 within vdW sum + 0.5
+    interacting1 = set()
+    interacting2 = set()
+    for res_seq1, (res_name1, atoms1) in chain_data[chain1].items():
+        for res_seq2, (res_name2, atoms2) in chain_data[chain2].items():
+            for (name1, coords1, vdw1) in atoms1:
+                if name1[0] == "H":
+                    continue
+                for (name2, coords2, vdw2) in atoms2:
+                    if name2[0] == "H":
+                        continue
+                    cutoff = vdw1 + vdw2 + 0.5
+                    if _distance(coords1, coords2) <= cutoff:
+                        interacting1.add(res_seq1)
+                        interacting2.add(res_seq2)
+                        break
+                else:
+                    continue
+                break
+
+    # Add nearby residues: same chain, Cα within 6 Å of an interacting residue
+    def add_nearby(chain_id):
+        interact = interacting1 if chain_id == chain1 else interacting2
+        ca_dict = chain_ca[chain_id]
+        for res_seq in list(ca_dict.keys()):
+            if res_seq in interact:
+                continue
+            rname, ca_coords = ca_dict[res_seq]
+            for other_seq in interact:
+                _, other_ca = ca_dict[other_seq]
+                if _distance(ca_coords, other_ca) <= NEARBY_CA_CUTOFF:
+                    interact.add(res_seq)
+                    break
+
+    add_nearby(chain1)
+    add_nearby(chain2)
+
+    interface_res1 = interacting1
+    interface_res2 = interacting2
+
+    # Write Cα-only PDB files (interface residues only, one file per chain)
+    ca_path1 = os.path.join(output_dir, f"{label}_{chain1}.pdb")
+    ca_path2 = os.path.join(output_dir, f"{label}_{chain2}.pdb")
+    serial = 1
+    with open(ca_path1, "w") as f1:
+        for res_seq in sorted(chain_ca[chain1].keys()):
+            if res_seq not in interface_res1:
+                continue
+            res_name, (x, y, z) = chain_ca[chain1][res_seq]
+            f1.write(_format_pdb_line(serial, " CA ", res_name, chain1, res_seq, x, y, z, bfactor=1.00))
+            serial += 1
+    serial = 1
+    with open(ca_path2, "w") as f2:
+        for res_seq in sorted(chain_ca[chain2].keys()):
+            if res_seq not in interface_res2:
+                continue
+            res_name, (x, y, z) = chain_ca[chain2][res_seq]
+            f2.write(_format_pdb_line(serial, " CA ", res_name, chain2, res_seq, x, y, z, bfactor=1.00))
+            serial += 1
+
+    # Write full PDB with bFactor = 1 for interface, 0 for non-interface
+    bfactor_path = os.path.join(output_dir, f"{label}_bfactor.pdb")
+    lines_out = []
+    serial = 1
+    for model in structure:
+        for chain in model:
+            cid = chain.id
+            interface_set = interface_res1 if cid == chain1 else (interface_res2 if cid == chain2 else set())
+            for residue in chain:
+                if not hasattr(residue, "id"):
+                    continue
+                hetflag, res_seq, icode = residue.id
+                if hetflag != " ":
+                    continue
+                bfactor_val = 1.0 if res_seq in interface_set else 0.0
+                for atom in residue:
+                    name = atom.get_name()
+                    coords = atom.get_coord()
+                    res_name = residue.get_resname()
+                    elem = "C" if name == "CA" else name[0]
+                    atom_name_4 = (" " + name).ljust(4)[:4]  # PDB atom name 4 chars
+                    occ = atom.get_occupancy()
+                    lines_out.append(
+                        _format_pdb_line(
+                            serial, atom_name_4, res_name, cid, res_seq,
+                            coords[0], coords[1], coords[2],
+                            occupancy=occ, bfactor=bfactor_val, element=elem
+                        )
+                    )
+                    serial += 1
+        break  # single model
+    with open(bfactor_path, "w") as f:
+        f.writelines(lines_out)
+        f.write("END\n")
+
+    return {
+        "ca_chain1": ca_path1,
+        "ca_chain2": ca_path2,
+        "bfactor_pdb": bfactor_path,
+        "interface_residues_chain1": interface_res1,
+        "interface_residues_chain2": interface_res2,
+    }
+
+if __name__ == "__main__":
+    result = generate_interface("1a28", "A", "B", pdb_dir="pdb", output_dir="interface")
+    print(result)
