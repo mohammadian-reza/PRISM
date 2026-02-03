@@ -1,6 +1,6 @@
 import os
 from Bio.PDB import PDBParser
-import pickle
+import json
 from utils import vdw_radii_extended, distance_calculator
 from Bio.PDB.Polypeptide import is_aa
 
@@ -154,11 +154,13 @@ def generate_interface(protein, chain1, chain2):
     with open(bfactor_path, "w") as f:
         f.writelines(lines_out)
         f.write("END\n")
-        
-    with open(os.path.join(INTERFACE_LIST_DIR, f"{label}_{chain1}.txt"), "w") as f:
-        pickle.dump(interface_res1, f)
-    with open(os.path.join(INTERFACE_LIST_DIR, f"{label}_{chain2}.txt"), "w") as f:
-        pickle.dump(interface_res2, f)
+    
+    interface_res1 = list(interface_res1)
+    interface_res2 = list(interface_res2)
+    with open(os.path.join(INTERFACE_LIST_DIR, f"{label}_{chain1}.json"), "w") as f:
+        json.dump(interface_res1, f, indent=4)
+    with open(os.path.join(INTERFACE_LIST_DIR, f"{label}_{chain2}.json"), "w") as f:
+        json.dump(interface_res2, f, indent=4)
 
     return {
         "ca_chain1": ca_path1,
@@ -173,5 +175,5 @@ if __name__ == "__main__":
     chain1 = "A"
     chain2 = "B"
     result = generate_interface(protein, chain1, chain2)
-    os.system(f"external_tools/TMalign {result['bfactor_pdb']} pdbs/{protein}.pdb -m alignment/matrix.out > alignment/out.tm")
-    print(result)
+    # os.system(f"external_tools/TMalign {result['bfactor_pdb']} pdbs/{protein}.pdb -m alignment/matrix.out > alignment/out.tm")
+    # print(result)
