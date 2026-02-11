@@ -6,7 +6,7 @@ from run_files.template_generate import template_generator
 from run_files.surface_extract import extract_surfaces
 from run_files.alignment import align
 from run_files.transformation import transformer
-from run_files.rosetta_refinement import FlexibleRefinement
+from run_files.rosetta_refinement import refiner
 
 def main(args):
     print("PDB download stage started...")
@@ -46,10 +46,9 @@ def main(args):
         print(pair)
     print("Transformation filtering stage finished...")
 
-    # print("Flexible refinement stage started...")
-    # energy_structure = FlexibleRefinement().refiner()
-    # print("Flexible refinement stage finished...")
-    # return energy_structure
+    print("Rosetta refinement stage started...")
+    refiner(passed_pairs)
+    print("Rosetta refinement stage finished...")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

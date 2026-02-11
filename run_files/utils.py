@@ -19,7 +19,6 @@ def read_ca_coordinates(path):
                     ca_coordinates.append(coord)
     return ca_coordinates
 
-
 def three2one(res_name):
     return {
         'ALA':'A',
