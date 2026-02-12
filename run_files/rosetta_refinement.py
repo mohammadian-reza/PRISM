@@ -1,6 +1,13 @@
 import os
+import sys
+from pathlib import Path
 
-from .interface import fiberdock_interface_extractor
+# Allow running as script: python run_files/rosetta_refinement.py
+_root = Path(__file__).resolve().parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
+from run_files.interface import fiberdock_interface_extractor
 
 ROSETTA_PREPACK = "/kuacc/apps/rosetta/rosetta_bin_linux_2022.42_bundle/main/source/bin/docking_prepack_protocol.static.linuxgccrelease"
 ROSETTA_DOCK = "/kuacc/apps/rosetta/rosetta_bin_linux_2022.42_bundle/main/source/bin/docking_protocol.static.linuxgccrelease"
@@ -12,20 +19,14 @@ os.makedirs("processed/rosetta_refinement/energies", exist_ok=True)
 os.makedirs("processed/rosetta_refinement/structures", exist_ok=True)
 
 def refiner(passed_pairs):
-    energy_structure = []
-    energy_file = "processed/rosetta_refinement/energies/refinement_energies"
-    with open(energy_file, "w") as file_out:
+    with open("processed/rosetta_refinement/refinement_energies.txt", "w") as file_out:
         for passed0, passed1 in passed_pairs:
+            #     left_output = f"processed/transformation/{template}_{left_query}_{right_query}_{orientation_suffix}_L.pdb"
+            #     right_output = f"processed/transformation/{template}_{left_query}_{right_query}_{orientation_suffix}_R.pdb"
             totalscore, intscore, structure = calculate_energy(passed0, passed1)
 
             if intscore != "-":
-                energy_structure.append([f"{passed0}\t{passed1}\t{intscore}", structure])
                 file_out.write(f"{passed0}\t{passed1}\t{intscore}\n")
-
-    pred_file = f"processed/rosetta_refinement/refinement_energies"
-    if energy_structure:
-        os.system(f"cp {energy_file} processed/rosetta_refinement/refinement_energies")
-        os.system(f"chmod 775 {pred_file}")
 
 def calculate_energy(passed0, passed1):
     try:
@@ -97,15 +98,9 @@ def calculate_energy(passed0, passed1):
 
 def combine_pdb(passed0, passed1):
     try:
-        ppath0 = os.path.join("processed/transformation", passed0)
-        ppath1 = os.path.join("processed/transformation", passed1)
+        combined_path = f'processed/rosetta_refinement/{passed0.split("/")[-1].split(".")[0]}_{passed1.split("/")[-1].split(".")[0]}_rosetta.pdb'
 
-        base0 = os.path.splitext(os.path.basename(passed0))[0]
-        base1 = os.path.splitext(os.path.basename(passed1))[0]
-        combined_name = f"{base0}_{base1}_rosetta.pdb"
-        combined_path = os.path.join("processed/rosetta_refinement", combined_name)
-
-        with open(ppath0, "r") as p0file, open(ppath1, "r") as p1file, open(combined_path, "w") as combinedfile:
+        with open(passed0, "r") as p0file, open(passed1, "r") as p1file, open(combined_path, "w") as combinedfile:
             for line in p0file:
                 if line[0:4] == "ATOM":
                     combinedfile.write(line)
@@ -115,6 +110,18 @@ def combine_pdb(passed0, passed1):
                     combinedfile.write(line)
             combinedfile.write("END\n")
         return combined_path
+
     except Exception as e:
         print(f"Exception during combine_pdb: {e}")
         return ""
+
+if __name__ == "__main__":
+    combined_path = "templates/pdbs/2ai9.pdb"
+    partner_chains = "A_B"
+    os.system(f"{ROSETTA_PREPACK} \
+        -database {ROSETTA_DB} \
+            -s {combined_path} \
+                -partners {partner_chains} \
+                    -ex1 -ex2aro \
+                -out:file:scorefile processed/rosetta_refinement/energies/{combined_path}_prepack_score.sc \
+                    -overwrite -ignore_zero_occupancy false -detect_disulf false")
